@@ -330,54 +330,128 @@ class PipeManager {
 }
 
 // ============================================================
-// BIRD RENDERER (Individual meshes - reliable across all Three.js versions)
+// BIRD RENDERER - bird-shaped geometry with body, beak, wing, eye, tail
 // ============================================================
+function createBirdGeometry() {
+  // Body - flattened egg shape via Shape extrusion
+  const body = new THREE.Shape();
+  body.moveTo(0.25, 0);
+  body.quadraticCurveTo(0.3, 0.18, 0.1, 0.24);
+  body.quadraticCurveTo(-0.15, 0.28, -0.3, 0.1);
+  body.lineTo(-0.3, -0.1);
+  body.quadraticCurveTo(-0.15, -0.26, 0.1, -0.22);
+  body.quadraticCurveTo(0.3, -0.16, 0.25, 0);
+  const bodyGeo = new THREE.ExtrudeGeometry(body, { depth: 0.25, bevelEnabled: false });
+  bodyGeo.translate(0, 0, -0.125);
+  return bodyGeo;
+}
+
+function createBeakGeometry() {
+  const beak = new THREE.Shape();
+  beak.moveTo(0, 0.04);
+  beak.lineTo(0.18, 0);
+  beak.lineTo(0, -0.04);
+  beak.lineTo(0, 0.04);
+  const geo = new THREE.ExtrudeGeometry(beak, { depth: 0.1, bevelEnabled: false });
+  geo.translate(0.2, -0.02, -0.05);
+  return geo;
+}
+
+function createWingGeometry() {
+  const wing = new THREE.Shape();
+  wing.moveTo(0, 0);
+  wing.quadraticCurveTo(-0.15, 0.22, -0.3, 0.15);
+  wing.lineTo(-0.15, 0);
+  wing.lineTo(0, 0);
+  const geo = new THREE.ExtrudeGeometry(wing, { depth: 0.02, bevelEnabled: false });
+  geo.translate(-0.02, 0.08, 0.12);
+  return geo;
+}
+
 class BirdRenderer {
   constructor(scene) {
     this.scene = scene;
     this.group = new THREE.Group();
     scene.add(this.group);
-    this.meshPool = [];
-    this.geo = new THREE.SphereGeometry(0.4, 10, 8);
-    this.materials = {
-      ai: new THREE.MeshBasicMaterial({ color: 0x4488ff }),
-      best: new THREE.MeshBasicMaterial({ color: 0xff3333 }),
+    this.birdPool = [];
+
+    // Pre-build shared geometries
+    this.bodyGeo = createBirdGeometry();
+    this.beakGeo = createBeakGeometry();
+    this.wingGeo = createWingGeometry();
+    this.eyeGeo = new THREE.SphereGeometry(0.04, 6, 4);
+
+    // Materials per bird type - body colors
+    this.mats = {
+      ai:     new THREE.MeshBasicMaterial({ color: 0x4499ff }),
+      best:   new THREE.MeshBasicMaterial({ color: 0xff4444 }),
       player: new THREE.MeshBasicMaterial({ color: 0xffd700 }),
     };
+    this.beakMat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
+    this.wingMats = {
+      ai:     new THREE.MeshBasicMaterial({ color: 0x3377dd }),
+      best:   new THREE.MeshBasicMaterial({ color: 0xcc2222 }),
+      player: new THREE.MeshBasicMaterial({ color: 0xddaa00 }),
+    };
+    this.eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.eyeBlackMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    this.pupilGeo = new THREE.SphereGeometry(0.025, 4, 4);
+
+    this.time = 0;
   }
 
-  _getMesh(index) {
-    if (index < this.meshPool.length) return this.meshPool[index];
-    const m = new THREE.Mesh(this.geo, this.materials.ai);
-    m.frustumCulled = false;
-    this.meshPool.push(m);
-    this.group.add(m);
-    return m;
+  _getBird(index) {
+    if (index < this.birdPool.length) return this.birdPool[index];
+
+    const g = new THREE.Group();
+    const bodyMesh = new THREE.Mesh(this.bodyGeo, this.mats.ai);
+    const beakMesh = new THREE.Mesh(this.beakGeo, this.beakMat);
+    const wingMesh = new THREE.Mesh(this.wingGeo, this.wingMats.ai);
+    const eyeWhite = new THREE.Mesh(this.eyeGeo, this.eyeWhiteMat);
+    const pupil = new THREE.Mesh(this.pupilGeo, this.eyeBlackMat);
+
+    eyeWhite.position.set(0.15, 0.1, 0.13);
+    pupil.position.set(0.18, 0.1, 0.15);
+
+    g.add(bodyMesh, beakMesh, wingMesh, eyeWhite, pupil);
+    g.traverse(c => { c.frustumCulled = false; });
+
+    const entry = { group: g, body: bodyMesh, wing: wingMesh };
+    this.birdPool.push(entry);
+    this.group.add(g);
+    return entry;
   }
 
-  update(birds, bestAiBird) {
+  update(birds, bestAiBird, dt) {
+    this.time += dt || 0.016;
     let idx = 0;
     for (const bird of birds) {
       if (!bird.alive) continue;
-      const m = this._getMesh(idx);
-      m.visible = true;
-      m.position.set(bird.x, bird.y, 0.5);
-      const tilt = Math.max(-0.6, Math.min(0.6, bird.velocity * 0.06));
-      m.rotation.z = tilt;
-      m.scale.set(1.1, 0.9, 0.8);
+      const b = this._getBird(idx);
+      b.group.visible = true;
+      b.group.position.set(bird.x, bird.y, 0.5);
 
-      if (bird.isPlayer) {
-        m.material = this.materials.player;
-      } else if (bird === bestAiBird) {
-        m.material = this.materials.best;
-      } else {
-        m.material = this.materials.ai;
-      }
+      // Tilt based on velocity
+      const tilt = Math.max(-0.5, Math.min(0.5, bird.velocity * 0.05));
+      b.group.rotation.z = tilt;
+
+      // Flap wing
+      const flapSpeed = bird.velocity > 2 ? 20 : 10;
+      const flapAngle = Math.sin(this.time * flapSpeed + idx * 0.5) * 0.3;
+      b.wing.rotation.z = flapAngle;
+
+      // Set colors by type
+      let type = 'ai';
+      if (bird.isPlayer) type = 'player';
+      else if (bird === bestAiBird) type = 'best';
+      b.body.material = this.mats[type];
+      b.wing.material = this.wingMats[type];
+
       idx++;
     }
-    // Hide unused meshes
-    for (let i = idx; i < this.meshPool.length; i++) {
-      this.meshPool[i].visible = false;
+    // Hide unused birds
+    for (let i = idx; i < this.birdPool.length; i++) {
+      this.birdPool[i].group.visible = false;
     }
   }
 }
@@ -506,6 +580,18 @@ class NeatManager {
       ],
       selection: neataptic.methods.selection.TOURNAMENT,
     });
+
+    // Randomize initial population weights so birds have diverse behavior from gen 1
+    // (Perceptron template creates identical clones - without this, all birds overlap)
+    for (const genome of this.neat.population) {
+      for (const conn of genome.connections) {
+        conn.weight = (Math.random() - 0.5) * 2;
+      }
+      for (const node of genome.nodes) {
+        node.bias = (Math.random() - 0.5) * 2;
+      }
+    }
+
     this.generation = 0;
   }
 
@@ -1049,7 +1135,7 @@ class Game {
     }
 
     // Render
-    this.birdRenderer.update(this.birds, this.bestAiBird);
+    this.birdRenderer.update(this.birds, this.bestAiBird, rawDt);
     this.pipeRenderer.update(this.pipeManager.pipes);
     this.visionRenderer.update(this.birds, this.pipeManager, Config.showVision);
     this.renderer.render(this.scene, this.camera);
