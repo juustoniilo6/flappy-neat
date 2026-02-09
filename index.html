@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flappy Bird - NEAT Neuroevolution</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/neataptic/1.4.7/neataptic.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; height: 100vh; }
+#header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 16px; background: #16213e; border-bottom: 1px solid #0f3460;
+  height: 48px; z-index: 10;
+}
+#header .stat { margin: 0 12px; font-size: 14px; }
+#header .stat span { color: #e94560; font-weight: bold; }
+#header h1 { font-size: 16px; color: #e94560; white-space: nowrap; }
+#main { display: flex; height: calc(100vh - 48px); }
+#game-container { flex: 1; position: relative; background: #000; }
+#game-container canvas { display: block; width: 100% !important; height: 100% !important; }
+#generation-overlay {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 48px; font-weight: bold; color: #e94560; text-shadow: 0 0 20px rgba(233,69,96,0.5);
+  pointer-events: none; opacity: 0; transition: opacity 0.3s;
+}
+#sidebar {
+  width: 350px; min-width: 350px; background: #16213e; border-left: 1px solid #0f3460;
+  overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px;
+}
+.panel { background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 12px; }
+.panel h3 { color: #e94560; font-size: 13px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+.slider-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.slider-row label { font-size: 12px; flex: 1; }
+.slider-row input[type="range"] { width: 120px; margin: 0 8px; accent-color: #e94560; }
+.slider-row .val { font-size: 12px; color: #e94560; min-width: 40px; text-align: right; }
+.checkbox-row { display: flex; align-items: center; margin-bottom: 4px; }
+.checkbox-row input { margin-right: 8px; accent-color: #e94560; }
+.checkbox-row label { font-size: 12px; cursor: pointer; }
+#nn-canvas { width: 100%; height: 180px; background: #111; border-radius: 4px; }
+#fitness-chart { width: 100%; height: 160px; }
+.btn { background: #e94560; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.btn:hover { background: #c23152; }
+.btn-row { display: flex; gap: 8px; margin-top: 4px; }
+#speed-display { font-size: 14px; color: #e94560; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Flappy NEAT</h1>
+  <div class="stat">Gen: <span id="hud-gen">0</span></div>
+  <div class="stat">Alive: <span id="hud-alive">0</span></div>
+  <div class="stat">Best: <span id="hud-best">0</span></div>
+  <div class="stat">All-time Best: <span id="hud-alltime">0</span></div>
+  <div class="stat">Speed: <span id="speed-display">1x</span></div>
+  <div>
+    <button class="btn" id="btn-slower">-</button>
+    <button class="btn" id="btn-faster">+</button>
+    <button class="btn" id="btn-pause">P</button>
+    <button class="btn" id="btn-restart">Restart</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="game-container">
+    <div id="generation-overlay"></div>
+  </div>
+  <div id="sidebar">
+    <div class="panel">
+      <h3>ML Parameters</h3>
+      <div class="slider-row">
+        <label>Population</label>
+        <input type="range" id="sl-pop" min="10" max="500" value="150" step="10">
+        <span class="val" id="val-pop">150</span>
+      </div>
+      <div class="slider-row">
+        <label>Mutation Rate</label>
+        <input type="range" id="sl-mutation" min="0.01" max="1" value="0.3" step="0.01">
+        <span class="val" id="val-mutation">0.30</span>
+      </div>
+      <div class="slider-row">
+        <label>Elitism %</label>
+        <input type="range" id="sl-elitism" min="0" max="50" value="10" step="1">
+        <span class="val" id="val-elitism">10%</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Game Parameters</h3>
+      <div class="slider-row">
+        <label>Pipe Gap</label>
+        <input type="range" id="sl-gap" min="2" max="6" value="3.5" step="0.1">
+        <span class="val" id="val-gap">3.5</span>
+      </div>
+      <div class="slider-row">
+        <label>Game Speed</label>
+        <input type="range" id="sl-speed" min="2" max="10" value="5" step="0.5">
+        <span class="val" id="val-speed">5.0</span>
+      </div>
+      <div class="slider-row">
+        <label>Gravity</label>
+        <input type="range" id="sl-gravity" min="10" max="40" value="25" step="1">
+        <span class="val" id="val-gravity">25</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Visualization</h3>
+      <div class="checkbox-row">
+        <input type="checkbox" id="cb-nn" checked>
+        <label for="cb-nn">Show Neural Net Diagram</label>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="cb-vision">
+        <label for="cb-vision">Show Vision Lines</label>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="cb-player" checked>
+        <label for="cb-player">Enable Player Bird</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Neural Network (Best Bird)</h3>
+      <canvas id="nn-canvas"></canvas>
+    </div>
+
+    <div class="panel">
+      <h3>Fitness History</h3>
+      <canvas id="fitness-chart"></canvas>
+    </div>
+
+    <div class="panel">
+      <h3>Controls</h3>
+      <div style="font-size:11px; line-height:1.6;">
+        <b>Space / Up</b> - Player jump<br>
+        <b>P</b> - Pause/Resume<br>
+        <b>R</b> - Restart<br>
+        <b>+/-</b> - Speed multiplier<br>
+        Player bird = <span style="color:#ffd700">Yellow</span>,
+        Best AI = <span style="color:#ff3333">Red</span>,
+        Others = <span style="color:#4488ff">Blue</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const Config = {
+  // ML
+  populationSize: 150,
+  mutationRate: 0.3,
+  elitismPercent: 10,
+  speedMultiplier: 1,
+
+  // Game
+  pipeGap: 3.5,
+  gameSpeed: 5,
+  gravity: 25,
+  jumpVelocity: 8,
+  worldHeight: 14,
+  worldWidth: 24,
+  pipeWidth: 1.2,
+  pipeSpacing: 6,
+  groundY: -6,
+  ceilingY: 7,
+
+  // Viz
+  showNN: true,
+  showVision: false,
+  enablePlayer: true,
+
+  // Queued changes
+  _pendingPopSize: null,
+};
+
+// ============================================================
+// BIRD
+// ============================================================
+class Bird {
+  constructor(genome, isPlayer = false) {
+    this.genome = genome;
+    this.isPlayer = isPlayer;
+    this.x = -8;
+    this.y = 0;
+    this.velocity = 0;
+    this.alive = true;
+    this.score = 0;
+    this.distance = 0;
+    this.fitness = 0;
+    this.pipesPassed = 0;
+    this.lastInputs = [0, 0, 0, 0, 0];
+    this.passedPipes = new Set();
+  }
+
+  think(nextPipe) {
+    if (!this.alive || this.isPlayer || !this.genome) return;
+    const inputs = this.getInputs(nextPipe);
+    this.lastInputs = inputs;
+    const output = this.genome.activate(inputs);
+    if (output[0] > 0.5) this.jump();
+  }
+
+  getInputs(nextPipe) {
+    const h = Config.worldHeight;
+    const birdY = (this.y - Config.groundY) / (Config.ceilingY - Config.groundY);
+    const vel = (this.velocity + 15) / 30;
+    let pipeDist = 1, gapY = 0.5, gapSize = 0.5;
+    if (nextPipe) {
+      pipeDist = Math.max(0, (nextPipe.x - this.x)) / (Config.pipeSpacing * 2);
+      gapY = (nextPipe.gapCenter - Config.groundY) / (Config.ceilingY - Config.groundY);
+      gapSize = nextPipe.gapSize / h;
+    }
+    return [
+      Math.max(0, Math.min(1, birdY)),
+      Math.max(0, Math.min(1, vel)),
+      Math.max(0, Math.min(1, pipeDist)),
+      Math.max(0, Math.min(1, gapY)),
+      Math.max(0, Math.min(1, gapSize))
+    ];
+  }
+
+  jump() {
+    if (!this.alive) return;
+    this.velocity = Config.jumpVelocity;
+  }
+
+  update(dt) {
+    if (!this.alive) return;
+    this.velocity -= Config.gravity * dt;
+    this.y += this.velocity * dt;
+    this.distance += Config.gameSpeed * dt;
+    this.fitness = this.distance + this.pipesPassed * 100;
+
+    if (this.y < Config.groundY + 0.4 || this.y > Config.ceilingY - 0.4) {
+      this.die();
+    }
+  }
+
+  die() {
+    this.alive = false;
+    if (this.genome) {
+      this.genome.score = this.fitness;
+    }
+  }
+}
+
+// ============================================================
+// PIPE MANAGER
+// ============================================================
+class PipeManager {
+  constructor() {
+    this.pipes = [];
+    this.nextPipeId = 0;
+  }
+
+  reset() {
+    this.pipes = [];
+    this.nextPipeId = 0;
+    for (let i = 0; i < 8; i++) {
+      this.spawnPipe(6 + i * Config.pipeSpacing);
+    }
+  }
+
+  spawnPipe(x) {
+    const minY = Config.groundY + Config.pipeGap / 2 + 1;
+    const maxY = Config.ceilingY - Config.pipeGap / 2 - 1;
+    const gapCenter = minY + Math.random() * (maxY - minY);
+    this.pipes.push({
+      id: this.nextPipeId++,
+      x: x,
+      gapCenter: gapCenter,
+      gapSize: Config.pipeGap,
+    });
+  }
+
+  update(dt) {
+    const speed = Config.gameSpeed * dt;
+    for (const p of this.pipes) {
+      p.x -= speed;
+    }
+    // Recycle pipes that go off screen
+    while (this.pipes.length > 0 && this.pipes[0].x < -14) {
+      this.pipes.shift();
+      const lastPipe = this.pipes[this.pipes.length - 1];
+      this.spawnPipe(lastPipe.x + Config.pipeSpacing);
+    }
+  }
+
+  getNextPipe(birdX) {
+    for (const p of this.pipes) {
+      if (p.x + Config.pipeWidth / 2 > birdX) return p;
+    }
+    return this.pipes[0];
+  }
+
+  checkCollision(bird) {
+    if (!bird.alive) return false;
+    const birdR = 0.35;
+    for (let i = 0; i < Math.min(3, this.pipes.length); i++) {
+      const p = this.pipes[i];
+      const pipeLeft = p.x - Config.pipeWidth / 2;
+      const pipeRight = p.x + Config.pipeWidth / 2;
+
+      if (bird.x + birdR > pipeLeft && bird.x - birdR < pipeRight) {
+        const gapTop = p.gapCenter + p.gapSize / 2;
+        const gapBottom = p.gapCenter - p.gapSize / 2;
+        if (bird.y + birdR > gapTop || bird.y - birdR < gapBottom) {
+          return true;
+        }
+      }
+
+      // Score - per bird tracking via Set of pipe indices
+      if (!bird.passedPipes.has(p.id) && bird.x > p.x + Config.pipeWidth / 2) {
+        bird.passedPipes.add(p.id);
+        bird.pipesPassed++;
+        bird.score++;
+      }
+    }
+    return false;
+  }
+}
+
+// ============================================================
+// BIRD RENDERER (InstancedMesh)
+// ============================================================
+class BirdRenderer {
+  constructor(scene) {
+    this.scene = scene;
+    this.maxBirds = 510;
+    const geo = new THREE.SphereGeometry(0.35, 8, 6);
+    const mat = new THREE.MeshPhongMaterial({ color: 0x4488ff });
+    this.mesh = new THREE.InstancedMesh(geo, mat, this.maxBirds);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0;
+    scene.add(this.mesh);
+
+    this.dummy = new THREE.Object3D();
+    this.colorObj = new THREE.Color();
+  }
+
+  update(birds, bestAiBird) {
+    let idx = 0;
+    for (const bird of birds) {
+      if (!bird.alive || idx >= this.maxBirds) continue;
+      this.dummy.position.set(bird.x, bird.y, 0);
+      const scaleY = 1 + bird.velocity * 0.02;
+      this.dummy.scale.set(1, Math.max(0.7, Math.min(1.3, scaleY)), 1);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(idx, this.dummy.matrix);
+
+      if (bird.isPlayer) {
+        this.colorObj.set(0xffd700);
+      } else if (bird === bestAiBird) {
+        this.colorObj.set(0xff3333);
+      } else {
+        this.colorObj.set(0x4488ff);
+      }
+      this.mesh.setColorAt(idx, this.colorObj);
+      idx++;
+    }
+    this.mesh.count = idx;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+}
+
+// ============================================================
+// PIPE RENDERER
+// ============================================================
+class PipeRenderer {
+  constructor(scene) {
+    this.scene = scene;
+    this.maxPipes = 20; // 10 pairs top+bottom
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshPhongMaterial({ color: 0x2ecc71 });
+    this.topMesh = new THREE.InstancedMesh(geo, mat, this.maxPipes);
+    this.botMesh = new THREE.InstancedMesh(geo, mat.clone(), this.maxPipes);
+    this.topMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.botMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(this.topMesh);
+    scene.add(this.botMesh);
+    this.dummy = new THREE.Object3D();
+  }
+
+  update(pipes) {
+    let idx = 0;
+    for (const p of pipes) {
+      if (idx >= this.maxPipes) break;
+      const gapTop = p.gapCenter + p.gapSize / 2;
+      const gapBot = p.gapCenter - p.gapSize / 2;
+      const topH = Config.ceilingY - gapTop + 2;
+      const botH = gapBot - Config.groundY + 2;
+
+      // Top pipe
+      this.dummy.position.set(p.x, gapTop + topH / 2, 0);
+      this.dummy.scale.set(Config.pipeWidth, topH, 1.2);
+      this.dummy.updateMatrix();
+      this.topMesh.setMatrixAt(idx, this.dummy.matrix);
+
+      // Bottom pipe
+      this.dummy.position.set(p.x, gapBot - botH / 2, 0);
+      this.dummy.scale.set(Config.pipeWidth, botH, 1.2);
+      this.dummy.updateMatrix();
+      this.botMesh.setMatrixAt(idx, this.dummy.matrix);
+      idx++;
+    }
+    this.topMesh.count = idx;
+    this.botMesh.count = idx;
+    this.topMesh.instanceMatrix.needsUpdate = true;
+    this.botMesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// ============================================================
+// VISION LINE RENDERER
+// ============================================================
+class VisionLineRenderer {
+  constructor(scene) {
+    this.scene = scene;
+    this.maxLines = 510;
+    const positions = new Float32Array(this.maxLines * 2 * 3); // 2 verts per line, 3 components
+    const colors = new Float32Array(this.maxLines * 2 * 3);
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4 });
+    this.lines = new THREE.LineSegments(this.geometry, mat);
+    this.lines.frustumCulled = false;
+    scene.add(this.lines);
+  }
+
+  update(birds, pipeManager, visible) {
+    if (!visible) {
+      this.geometry.setDrawRange(0, 0);
+      return;
+    }
+    const posAttr = this.geometry.getAttribute('position');
+    const colAttr = this.geometry.getAttribute('color');
+    let idx = 0;
+    for (const bird of birds) {
+      if (!bird.alive || idx >= this.maxLines) continue;
+      const nextPipe = pipeManager.getNextPipe(bird.x);
+      if (!nextPipe) continue;
+      const i6 = idx * 6;
+      posAttr.array[i6] = bird.x;
+      posAttr.array[i6 + 1] = bird.y;
+      posAttr.array[i6 + 2] = 0.1;
+      posAttr.array[i6 + 3] = nextPipe.x;
+      posAttr.array[i6 + 4] = nextPipe.gapCenter;
+      posAttr.array[i6 + 5] = 0.1;
+      // Color: green for player, white for AI
+      const c = bird.isPlayer ? [1, 1, 0] : [1, 1, 1];
+      colAttr.array[i6] = c[0]; colAttr.array[i6 + 1] = c[1]; colAttr.array[i6 + 2] = c[2];
+      colAttr.array[i6 + 3] = c[0]; colAttr.array[i6 + 4] = c[1]; colAttr.array[i6 + 5] = c[2];
+      idx++;
+    }
+    this.geometry.setDrawRange(0, idx * 2);
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+  }
+}
+
+// ============================================================
+// NEAT MANAGER
+// ============================================================
+class NeatManager {
+  constructor() {
+    this.neat = null;
+    this.generation = 0;
+    this.init();
+  }
+
+  init() {
+    this.neat = new neataptic.Neat(5, 1, null, {
+      popsize: Config.populationSize,
+      mutationRate: Config.mutationRate,
+      elitism: Math.round(Config.populationSize * Config.elitismPercent / 100),
+      network: new neataptic.architect.Perceptron(5, 8, 1),
+      mutation: [
+        neataptic.methods.mutation.MOD_WEIGHT,
+        neataptic.methods.mutation.MOD_BIAS,
+        neataptic.methods.mutation.ADD_CONN,
+        neataptic.methods.mutation.SUB_CONN,
+        neataptic.methods.mutation.ADD_NODE,
+        neataptic.methods.mutation.SUB_NODE,
+      ],
+      selection: neataptic.methods.selection.TOURNAMENT,
+    });
+    this.generation = 0;
+  }
+
+  createBirds() {
+    const birds = [];
+    for (const genome of this.neat.population) {
+      genome.score = 0;
+      birds.push(new Bird(genome));
+    }
+    return birds;
+  }
+
+  endGeneration(birds) {
+    // Assign fitness scores
+    for (const bird of birds) {
+      if (bird.genome && !bird.isPlayer) {
+        bird.genome.score = bird.fitness;
+      }
+    }
+
+    // Sort by score descending
+    this.neat.sort();
+
+    // Get stats before evolving
+    const bestFitness = this.neat.population[0].score || 0;
+    const avgFitness = this.neat.population.reduce((s, g) => s + (g.score || 0), 0) / this.neat.population.length;
+
+    // Apply pending pop size changes
+    if (Config._pendingPopSize !== null) {
+      Config.populationSize = Config._pendingPopSize;
+      Config._pendingPopSize = null;
+    }
+
+    // Update NEAT params
+    const popSize = Config.populationSize;
+    const elitismCount = Math.max(1, Math.round(popSize * Config.elitismPercent / 100));
+    this.neat.mutationRate = Config.mutationRate;
+    this.neat.elitism = elitismCount;
+    this.neat.popsize = popSize;
+
+    // Manual evolution: elites + offspring + mutate
+    const newPop = [];
+
+    // Keep elites
+    for (let i = 0; i < elitismCount && i < this.neat.population.length; i++) {
+      newPop.push(this.neat.population[i]);
+    }
+
+    // Breed offspring to fill remaining slots
+    while (newPop.length < popSize) {
+      const parent1 = this.neat.getParent();
+      const parent2 = this.neat.getParent();
+      if (parent1 && parent2) {
+        const child = neataptic.Network.crossOver(parent1, parent2);
+        newPop.push(child);
+      } else {
+        // Fallback: clone best and mutate
+        const clone = this.neat.population[0].clone();
+        newPop.push(clone);
+      }
+    }
+
+    // Mutate non-elites
+    for (let i = elitismCount; i < newPop.length; i++) {
+      if (Math.random() < Config.mutationRate) {
+        const mutations = this.neat.mutation;
+        const m = mutations[Math.floor(Math.random() * mutations.length)];
+        try { newPop[i].mutate(m); } catch(e) { /* some mutations can fail */ }
+      }
+    }
+
+    this.neat.population = newPop;
+    this.generation++;
+
+    return { bestFitness, avgFitness };
+  }
+
+  getBestGenome() {
+    let best = this.neat.population[0];
+    for (const g of this.neat.population) {
+      if ((g.score || 0) > (best.score || 0)) best = g;
+    }
+    return best;
+  }
+}
+
+// ============================================================
+// NEURAL NET VISUALIZER
+// ============================================================
+class NeuralNetVisualizer {
+  constructor(canvasEl) {
+    this.canvas = canvasEl;
+    this.ctx = canvasEl.getContext('2d');
+    this.lastUpdate = 0;
+  }
+
+  draw(genome) {
+    const now = performance.now();
+    if (now - this.lastUpdate < 100) return; // 10fps cap
+    this.lastUpdate = now;
+
+    const c = this.ctx;
+    const w = this.canvas.width = this.canvas.offsetWidth;
+    const h = this.canvas.height = this.canvas.offsetHeight;
+    c.clearRect(0, 0, w, h);
+
+    if (!genome || !genome.nodes || !genome.connections) return;
+
+    // Organize nodes by type
+    const inputNodes = genome.nodes.filter(n => n.type === 'input');
+    const outputNodes = genome.nodes.filter(n => n.type === 'output');
+    const hiddenNodes = genome.nodes.filter(n => n.type !== 'input' && n.type !== 'output');
+
+    // Assign positions
+    const nodePos = new Map();
+    const padding = 30;
+    const layerCount = hiddenNodes.length > 0 ? 3 : 2;
+    const layerGap = (w - padding * 2) / (layerCount + 1);
+
+    const inputLabels = ['Bird Y', 'Vel', 'Pipe Dist', 'Gap Y', 'Gap Size'];
+    const outputLabels = ['Jump'];
+
+    // Input layer
+    inputNodes.forEach((n, i) => {
+      const y = padding + (i + 1) * (h - padding * 2) / (inputNodes.length + 1);
+      nodePos.set(n, { x: padding + layerGap * 0.5, y, label: inputLabels[i] || '' });
+    });
+
+    // Hidden layer(s) - simple horizontal spread
+    hiddenNodes.forEach((n, i) => {
+      const cols = Math.ceil(hiddenNodes.length / 6);
+      const col = Math.floor(i / 6);
+      const row = i % 6;
+      const x = padding + layerGap * (1 + (col + 1) * layerCount / (cols + 2));
+      const y = padding + (row + 1) * (h - padding * 2) / 7;
+      nodePos.set(n, { x, y, label: '' });
+    });
+
+    // Output layer
+    outputNodes.forEach((n, i) => {
+      const y = h / 2;
+      nodePos.set(n, { x: w - padding - layerGap * 0.3, y, label: outputLabels[i] || '' });
+    });
+
+    // Draw connections
+    for (const conn of genome.connections) {
+      if (!conn.enabled) continue;
+      const fromNode = conn.from;
+      const toNode = conn.to;
+      const fromPos = nodePos.get(fromNode);
+      const toPos = nodePos.get(toNode);
+      if (!fromPos || !toPos) continue;
+
+      const weight = conn.weight || 0;
+      const absW = Math.min(Math.abs(weight), 3);
+      c.beginPath();
+      c.moveTo(fromPos.x, fromPos.y);
+      c.lineTo(toPos.x, toPos.y);
+      c.strokeStyle = weight > 0
+        ? `rgba(46, 204, 113, ${0.3 + absW * 0.2})`
+        : `rgba(231, 76, 60, ${0.3 + absW * 0.2})`;
+      c.lineWidth = 0.5 + absW * 1.2;
+      c.stroke();
+    }
+
+    // Draw nodes
+    for (const [node, pos] of nodePos) {
+      const activation = node.activation || 0;
+      const brightness = Math.min(1, Math.abs(activation));
+      c.beginPath();
+      c.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
+      c.fillStyle = `rgba(233, 69, 96, ${0.3 + brightness * 0.7})`;
+      c.fill();
+      c.strokeStyle = '#e94560';
+      c.lineWidth = 1.5;
+      c.stroke();
+
+      if (pos.label) {
+        c.fillStyle = '#aaa';
+        c.font = '9px sans-serif';
+        c.textAlign = node.type === 'input' ? 'right' : 'left';
+        const tx = node.type === 'input' ? pos.x - 12 : pos.x + 12;
+        c.fillText(pos.label, tx, pos.y + 3);
+      }
+    }
+  }
+}
+
+// ============================================================
+// FITNESS CHART
+// ============================================================
+class FitnessChart {
+  constructor(canvasEl) {
+    this.chart = new Chart(canvasEl, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Best Fitness',
+            data: [],
+            borderColor: '#e94560',
+            backgroundColor: 'rgba(233,69,96,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+          },
+          {
+            label: 'Avg Fitness',
+            data: [],
+            borderColor: '#4488ff',
+            backgroundColor: 'rgba(68,136,255,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: { ticks: { color: '#888', maxTicksLimit: 10 }, grid: { color: '#333' } },
+          y: { ticks: { color: '#888' }, grid: { color: '#333' }, beginAtZero: true }
+        },
+        plugins: {
+          legend: { labels: { color: '#ccc', boxWidth: 12, font: { size: 10 } } }
+        }
+      }
+    });
+  }
+
+  addGeneration(gen, bestFitness, avgFitness) {
+    this.chart.data.labels.push(gen);
+    this.chart.data.datasets[0].data.push(Math.round(bestFitness));
+    this.chart.data.datasets[1].data.push(Math.round(avgFitness));
+    // Keep last 50 generations visible
+    if (this.chart.data.labels.length > 50) {
+      this.chart.data.labels.shift();
+      this.chart.data.datasets[0].data.shift();
+      this.chart.data.datasets[1].data.shift();
+    }
+    this.chart.update();
+  }
+
+  reset() {
+    this.chart.data.labels = [];
+    this.chart.data.datasets[0].data = [];
+    this.chart.data.datasets[1].data = [];
+    this.chart.update();
+  }
+}
+
+// ============================================================
+// UI CONTROLLER
+// ============================================================
+class UIController {
+  constructor(game) {
+    this.game = game;
+    this.bindSliders();
+    this.bindCheckboxes();
+    this.bindButtons();
+    this.bindKeyboard();
+  }
+
+  bindSliders() {
+    this.bindSlider('sl-pop', 'val-pop', v => {
+      Config._pendingPopSize = parseInt(v);
+      return parseInt(v);
+    });
+    this.bindSlider('sl-mutation', 'val-mutation', v => {
+      Config.mutationRate = parseFloat(v);
+      return parseFloat(v).toFixed(2);
+    });
+    this.bindSlider('sl-elitism', 'val-elitism', v => {
+      Config.elitismPercent = parseInt(v);
+      return v + '%';
+    });
+    this.bindSlider('sl-gap', 'val-gap', v => {
+      Config.pipeGap = parseFloat(v);
+      return parseFloat(v).toFixed(1);
+    });
+    this.bindSlider('sl-speed', 'val-speed', v => {
+      Config.gameSpeed = parseFloat(v);
+      return parseFloat(v).toFixed(1);
+    });
+    this.bindSlider('sl-gravity', 'val-gravity', v => {
+      Config.gravity = parseInt(v);
+      return parseInt(v);
+    });
+  }
+
+  bindSlider(sliderId, valId, handler) {
+    const slider = document.getElementById(sliderId);
+    const valEl = document.getElementById(valId);
+    slider.addEventListener('input', () => {
+      const display = handler(slider.value);
+      valEl.textContent = display;
+    });
+  }
+
+  bindCheckboxes() {
+    document.getElementById('cb-nn').addEventListener('change', e => { Config.showNN = e.target.checked; });
+    document.getElementById('cb-vision').addEventListener('change', e => { Config.showVision = e.target.checked; });
+    document.getElementById('cb-player').addEventListener('change', e => { Config.enablePlayer = e.target.checked; });
+  }
+
+  bindButtons() {
+    document.getElementById('btn-faster').addEventListener('click', () => this.changeSpeed(1));
+    document.getElementById('btn-slower').addEventListener('click', () => this.changeSpeed(-1));
+    document.getElementById('btn-pause').addEventListener('click', () => this.game.togglePause());
+    document.getElementById('btn-restart').addEventListener('click', () => this.game.restart());
+  }
+
+  changeSpeed(dir) {
+    const speeds = [1, 2, 3, 5, 8, 10];
+    let idx = speeds.indexOf(Config.speedMultiplier);
+    if (idx === -1) idx = 0;
+    idx = Math.max(0, Math.min(speeds.length - 1, idx + dir));
+    Config.speedMultiplier = speeds[idx];
+    document.getElementById('speed-display').textContent = Config.speedMultiplier + 'x';
+  }
+
+  bindKeyboard() {
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space' || e.code === 'ArrowUp') {
+        e.preventDefault();
+        this.game.playerJump();
+      }
+      if (e.code === 'KeyP') this.game.togglePause();
+      if (e.code === 'KeyR') this.game.restart();
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') this.changeSpeed(1);
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') this.changeSpeed(-1);
+    });
+  }
+}
+
+// ============================================================
+// GAME
+// ============================================================
+class Game {
+  constructor() {
+    this.paused = false;
+    this.allTimeBest = 0;
+    this.birds = [];
+    this.playerBird = null;
+    this.bestAiBird = null;
+
+    this.initScene();
+    this.pipeManager = new PipeManager();
+    this.birdRenderer = new BirdRenderer(this.scene);
+    this.pipeRenderer = new PipeRenderer(this.scene);
+    this.visionRenderer = new VisionLineRenderer(this.scene);
+    this.neatManager = new NeatManager();
+    this.nnViz = new NeuralNetVisualizer(document.getElementById('nn-canvas'));
+    this.fitnessChart = new FitnessChart(document.getElementById('fitness-chart'));
+    this.ui = new UIController(this);
+
+    this.startGeneration();
+    this.lastTime = performance.now();
+    this.animate = this.animate.bind(this);
+    requestAnimationFrame(this.animate);
+  }
+
+  initScene() {
+    const container = document.getElementById('game-container');
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(this.renderer.domElement);
+
+    this.scene = new THREE.Scene();
+
+    // Orthographic camera
+    const aspect = container.clientWidth / container.clientHeight;
+    const viewH = Config.worldHeight;
+    this.camera = new THREE.OrthographicCamera(
+      -viewH * aspect / 2, viewH * aspect / 2,
+      viewH / 2, -viewH / 2, 0.1, 100
+    );
+    this.camera.position.set(0, 0.5, 10);
+    this.camera.lookAt(0, 0.5, 0);
+
+    // Lighting
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    this.scene.add(ambient);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(5, 10, 7);
+    this.scene.add(dir);
+
+    // Sky background
+    this.scene.background = new THREE.Color(0x87CEEB);
+
+    // Ground
+    const groundGeo = new THREE.PlaneGeometry(60, 3);
+    const groundMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+    this.ground = new THREE.Mesh(groundGeo, groundMat);
+    this.ground.position.set(0, Config.groundY - 1, -0.5);
+    this.scene.add(this.ground);
+
+    // Grass strip
+    const grassGeo = new THREE.PlaneGeometry(60, 0.4);
+    const grassMat = new THREE.MeshPhongMaterial({ color: 0x27ae60 });
+    const grass = new THREE.Mesh(grassGeo, grassMat);
+    grass.position.set(0, Config.groundY + 0.2, -0.3);
+    this.scene.add(grass);
+
+    this.handleResize();
+    window.addEventListener('resize', () => this.handleResize());
+  }
+
+  handleResize() {
+    const container = document.getElementById('game-container');
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    this.renderer.setSize(w, h);
+    const aspect = w / h;
+    const viewH = Config.worldHeight;
+    this.camera.left = -viewH * aspect / 2;
+    this.camera.right = viewH * aspect / 2;
+    this.camera.top = viewH / 2;
+    this.camera.bottom = -viewH / 2;
+    this.camera.updateProjectionMatrix();
+  }
+
+  startGeneration() {
+    this.pipeManager.reset();
+    this.birds = this.neatManager.createBirds();
+
+    // Add player bird
+    if (Config.enablePlayer) {
+      this.playerBird = new Bird(null, true);
+      this.birds.push(this.playerBird);
+    } else {
+      this.playerBird = null;
+    }
+
+    this.bestAiBird = null;
+    this.showGenerationOverlay();
+    this.updateHUD();
+  }
+
+  endGeneration() {
+    const aiBirds = this.birds.filter(b => !b.isPlayer);
+    const stats = this.neatManager.endGeneration(aiBirds);
+    this.fitnessChart.addGeneration(this.neatManager.generation, stats.bestFitness, stats.avgFitness);
+
+    // Update all-time best
+    const currentBest = Math.max(...aiBirds.map(b => b.score));
+    if (currentBest > this.allTimeBest) this.allTimeBest = currentBest;
+
+    this.startGeneration();
+  }
+
+  showGenerationOverlay() {
+    const el = document.getElementById('generation-overlay');
+    el.textContent = `Generation ${this.neatManager.generation + 1}`;
+    el.style.opacity = 1;
+    setTimeout(() => { el.style.opacity = 0; }, 1200);
+  }
+
+  playerJump() {
+    if (this.playerBird && this.playerBird.alive) {
+      this.playerBird.jump();
+    }
+  }
+
+  togglePause() {
+    this.paused = !this.paused;
+    document.getElementById('btn-pause').textContent = this.paused ? '>' : 'P';
+  }
+
+  restart() {
+    this.allTimeBest = 0;
+    this.neatManager.init();
+    this.fitnessChart.reset();
+    this.startGeneration();
+  }
+
+  updateHUD() {
+    document.getElementById('hud-gen').textContent = this.neatManager.generation + 1;
+    const aliveCount = this.birds.filter(b => b.alive && !b.isPlayer).length;
+    document.getElementById('hud-alive').textContent = aliveCount + '/' + Config.populationSize;
+    const currentBest = Math.max(0, ...this.birds.filter(b => !b.isPlayer).map(b => b.score));
+    document.getElementById('hud-best').textContent = currentBest;
+    document.getElementById('hud-alltime').textContent = this.allTimeBest;
+  }
+
+  updatePhysics(dt) {
+    const nextPipe = this.pipeManager.getNextPipe(-8);
+
+    // Find best alive AI bird
+    let bestFitness = -1;
+    this.bestAiBird = null;
+    for (const bird of this.birds) {
+      if (bird.alive && !bird.isPlayer && bird.fitness > bestFitness) {
+        bestFitness = bird.fitness;
+        this.bestAiBird = bird;
+      }
+    }
+
+    // Bird AI think + physics
+    for (const bird of this.birds) {
+      if (!bird.alive) continue;
+      const pipe = this.pipeManager.getNextPipe(bird.x);
+      bird.think(pipe);
+      bird.update(dt);
+      if (this.pipeManager.checkCollision(bird)) {
+        bird.die();
+      }
+    }
+
+    // Update pipes
+    this.pipeManager.update(dt);
+
+    // Check if all AI birds dead
+    const aiAlive = this.birds.some(b => b.alive && !b.isPlayer);
+    if (!aiAlive) {
+      this.endGeneration();
+    }
+  }
+
+  animate(now) {
+    requestAnimationFrame(this.animate);
+    if (this.paused) return;
+
+    const rawDt = Math.min((now - this.lastTime) / 1000, 0.05);
+    this.lastTime = now;
+
+    const steps = Config.speedMultiplier;
+    const headless = steps > 5;
+
+    if (headless) {
+      // Headless fast-forward: run multiple full steps without rendering
+      const stepDt = rawDt;
+      for (let s = 0; s < steps; s++) {
+        this.updatePhysics(stepDt);
+        // Check if generation ended (startGeneration resets birds)
+        // If so, we might be in a new generation already
+      }
+    } else {
+      // Normal: sub-step physics, render once
+      const stepDt = rawDt;
+      for (let s = 0; s < steps; s++) {
+        this.updatePhysics(stepDt);
+      }
+    }
+
+    // Render
+    this.birdRenderer.update(this.birds, this.bestAiBird);
+    this.pipeRenderer.update(this.pipeManager.pipes);
+    this.visionRenderer.update(this.birds, this.pipeManager, Config.showVision);
+    this.renderer.render(this.scene, this.camera);
+
+    // Update HUD
+    this.updateHUD();
+
+    // Update NN viz
+    if (Config.showNN && this.bestAiBird && this.bestAiBird.genome) {
+      this.nnViz.draw(this.bestAiBird.genome);
+    }
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  window.game = new Game();
+});
+</script>
+</body>
+</html>
