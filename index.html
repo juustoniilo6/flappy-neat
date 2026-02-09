@@ -20,7 +20,7 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 #header h1 { font-size: 16px; color: #e94560; white-space: nowrap; }
 #main { display: flex; height: calc(100vh - 48px); }
 #game-container { flex: 1; position: relative; background: #000; }
-#game-container canvas { display: block; width: 100% !important; height: 100% !important; }
+#game-container canvas { display: block; }
 #generation-overlay {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   font-size: 48px; font-weight: bold; color: #e94560; text-shadow: 0 0 20px rgba(233,69,96,0.5);
@@ -330,56 +330,55 @@ class PipeManager {
 }
 
 // ============================================================
-// BIRD RENDERER (InstancedMesh)
+// BIRD RENDERER (Individual meshes - reliable across all Three.js versions)
 // ============================================================
 class BirdRenderer {
   constructor(scene) {
     this.scene = scene;
-    this.maxBirds = 510;
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    this.meshPool = [];
+    this.geo = new THREE.SphereGeometry(0.4, 10, 8);
+    this.materials = {
+      ai: new THREE.MeshBasicMaterial({ color: 0x4488ff }),
+      best: new THREE.MeshBasicMaterial({ color: 0xff3333 }),
+      player: new THREE.MeshBasicMaterial({ color: 0xffd700 }),
+    };
+  }
 
-    // Bird body: slightly elongated ellipsoid
-    const geo = new THREE.SphereGeometry(0.4, 10, 8);
-    // MeshLambertMaterial responds well to instance colors in r128
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    this.mesh = new THREE.InstancedMesh(geo, mat, this.maxBirds);
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.count = 0;
-    // Initialize instanceColor buffer so colors work from frame 1
-    this.colorObj = new THREE.Color();
-    for (let i = 0; i < this.maxBirds; i++) {
-      this.colorObj.set(0x4488ff);
-      this.mesh.setColorAt(i, this.colorObj);
-    }
-    this.mesh.instanceColor.needsUpdate = true;
-    scene.add(this.mesh);
-
-    this.dummy = new THREE.Object3D();
+  _getMesh(index) {
+    if (index < this.meshPool.length) return this.meshPool[index];
+    const m = new THREE.Mesh(this.geo, this.materials.ai);
+    m.frustumCulled = false;
+    this.meshPool.push(m);
+    this.group.add(m);
+    return m;
   }
 
   update(birds, bestAiBird) {
     let idx = 0;
     for (const bird of birds) {
-      if (!bird.alive || idx >= this.maxBirds) continue;
-      this.dummy.position.set(bird.x, bird.y, 0.5);
+      if (!bird.alive) continue;
+      const m = this._getMesh(idx);
+      m.visible = true;
+      m.position.set(bird.x, bird.y, 0.5);
       const tilt = Math.max(-0.6, Math.min(0.6, bird.velocity * 0.06));
-      this.dummy.rotation.set(0, 0, tilt);
-      this.dummy.scale.set(1.1, 0.9, 0.8);
-      this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(idx, this.dummy.matrix);
+      m.rotation.z = tilt;
+      m.scale.set(1.1, 0.9, 0.8);
 
       if (bird.isPlayer) {
-        this.colorObj.set(0xffd700);
+        m.material = this.materials.player;
       } else if (bird === bestAiBird) {
-        this.colorObj.set(0xff3333);
+        m.material = this.materials.best;
       } else {
-        this.colorObj.set(0x4488ff);
+        m.material = this.materials.ai;
       }
-      this.mesh.setColorAt(idx, this.colorObj);
       idx++;
     }
-    this.mesh.count = idx;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    // Hide unused meshes
+    for (let i = idx; i < this.meshPool.length; i++) {
+      this.meshPool[i].visible = false;
+    }
   }
 }
 
@@ -391,9 +390,11 @@ class PipeRenderer {
     this.scene = scene;
     this.maxPipes = 20; // 10 pairs top+bottom
     const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat = new THREE.MeshPhongMaterial({ color: 0x2ecc71 });
+    const mat = new THREE.MeshBasicMaterial({ color: 0x2ecc71 });
     this.topMesh = new THREE.InstancedMesh(geo, mat, this.maxPipes);
     this.botMesh = new THREE.InstancedMesh(geo, mat.clone(), this.maxPipes);
+    this.topMesh.frustumCulled = false;
+    this.botMesh.frustumCulled = false;
     this.topMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.botMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.topMesh);
@@ -889,26 +890,19 @@ class Game {
     this.camera.position.set(0, 0.5, 10);
     this.camera.lookAt(0, 0.5, 0);
 
-    // Lighting
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-    this.scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-    dir.position.set(5, 10, 7);
-    this.scene.add(dir);
-
     // Sky background
     this.scene.background = new THREE.Color(0x87CEEB);
 
     // Ground
     const groundGeo = new THREE.PlaneGeometry(60, 3);
-    const groundMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+    const groundMat = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
     this.ground = new THREE.Mesh(groundGeo, groundMat);
     this.ground.position.set(0, Config.groundY - 1, -0.5);
     this.scene.add(this.ground);
 
     // Grass strip
     const grassGeo = new THREE.PlaneGeometry(60, 0.4);
-    const grassMat = new THREE.MeshPhongMaterial({ color: 0x27ae60 });
+    const grassMat = new THREE.MeshBasicMaterial({ color: 0x27ae60 });
     const grass = new THREE.Mesh(grassGeo, grassMat);
     grass.position.set(0, Config.groundY + 0.2, -0.3);
     this.scene.add(grass);
