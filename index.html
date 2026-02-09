@@ -350,40 +350,39 @@ class PipeManager {
 }
 
 // ============================================================
-// BIRD RENDERER - bird-shaped geometry with body, beak, wing, eye, tail
+// BIRD RENDERER - InstancedMesh per color type (6 draw calls total)
 // ============================================================
-function createBirdGeometry() {
-  // Body - flattened egg shape via Shape extrusion
-  const body = new THREE.Shape();
-  body.moveTo(0.25, 0);
-  body.quadraticCurveTo(0.3, 0.18, 0.1, 0.24);
-  body.quadraticCurveTo(-0.15, 0.28, -0.3, 0.1);
-  body.lineTo(-0.3, -0.1);
-  body.quadraticCurveTo(-0.15, -0.26, 0.1, -0.22);
-  body.quadraticCurveTo(0.3, -0.16, 0.25, 0);
-  const bodyGeo = new THREE.ExtrudeGeometry(body, { depth: 0.25, bevelEnabled: false });
-  bodyGeo.translate(0, 0, -0.125);
-  return bodyGeo;
+function createBirdBodyGeo() {
+  const s = new THREE.Shape();
+  s.moveTo(0.25, 0);
+  s.quadraticCurveTo(0.3, 0.18, 0.1, 0.24);
+  s.quadraticCurveTo(-0.15, 0.28, -0.3, 0.1);
+  s.lineTo(-0.3, -0.1);
+  s.quadraticCurveTo(-0.15, -0.26, 0.1, -0.22);
+  s.quadraticCurveTo(0.3, -0.16, 0.25, 0);
+  const geo = new THREE.ExtrudeGeometry(s, { depth: 0.25, bevelEnabled: false });
+  geo.translate(0, 0, -0.125);
+  return geo;
 }
 
-function createBeakGeometry() {
-  const beak = new THREE.Shape();
-  beak.moveTo(0, 0.04);
-  beak.lineTo(0.18, 0);
-  beak.lineTo(0, -0.04);
-  beak.lineTo(0, 0.04);
-  const geo = new THREE.ExtrudeGeometry(beak, { depth: 0.1, bevelEnabled: false });
+function createBirdBeakGeo() {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0.04);
+  s.lineTo(0.18, 0);
+  s.lineTo(0, -0.04);
+  s.lineTo(0, 0.04);
+  const geo = new THREE.ExtrudeGeometry(s, { depth: 0.1, bevelEnabled: false });
   geo.translate(0.2, -0.02, -0.05);
   return geo;
 }
 
-function createWingGeometry() {
-  const wing = new THREE.Shape();
-  wing.moveTo(0, 0);
-  wing.quadraticCurveTo(-0.15, 0.22, -0.3, 0.15);
-  wing.lineTo(-0.15, 0);
-  wing.lineTo(0, 0);
-  const geo = new THREE.ExtrudeGeometry(wing, { depth: 0.02, bevelEnabled: false });
+function createBirdWingGeo() {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0);
+  s.quadraticCurveTo(-0.15, 0.22, -0.3, 0.15);
+  s.lineTo(-0.15, 0);
+  s.lineTo(0, 0);
+  const geo = new THREE.ExtrudeGeometry(s, { depth: 0.02, bevelEnabled: false });
   geo.translate(-0.02, 0.08, 0.12);
   return geo;
 }
@@ -391,87 +390,100 @@ function createWingGeometry() {
 class BirdRenderer {
   constructor(scene) {
     this.scene = scene;
-    this.group = new THREE.Group();
-    scene.add(this.group);
-    this.birdPool = [];
+    this.maxBirds = 510;
+    this.dummy = new THREE.Object3D();
 
-    // Pre-build shared geometries
-    this.bodyGeo = createBirdGeometry();
-    this.beakGeo = createBeakGeometry();
-    this.wingGeo = createWingGeometry();
-    this.eyeGeo = new THREE.SphereGeometry(0.04, 6, 4);
+    const bodyGeo = createBirdBodyGeo();
+    const beakGeo = createBirdBeakGeo();
+    const wingGeo = createBirdWingGeo();
+    const eyeGeo = new THREE.SphereGeometry(0.035, 5, 4);
 
-    // Materials per bird type - body colors
-    this.mats = {
-      ai:     new THREE.MeshBasicMaterial({ color: 0x4499ff }),
-      best:   new THREE.MeshBasicMaterial({ color: 0xff4444 }),
-      player: new THREE.MeshBasicMaterial({ color: 0xffd700 }),
+    // 3 InstancedMesh sets: ai (blue), best (red), player (gold)
+    // Each set has body, beak, wing, eye = 4 meshes per type = 12 draw calls max
+    const types = {
+      ai:     { body: 0x4499ff, wing: 0x3377dd },
+      best:   { body: 0xff4444, wing: 0xcc2222 },
+      player: { body: 0xffd700, wing: 0xddaa00 },
     };
-    this.beakMat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
-    this.wingMats = {
-      ai:     new THREE.MeshBasicMaterial({ color: 0x3377dd }),
-      best:   new THREE.MeshBasicMaterial({ color: 0xcc2222 }),
-      player: new THREE.MeshBasicMaterial({ color: 0xddaa00 }),
-    };
-    this.eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    this.eyeBlackMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    this.pupilGeo = new THREE.SphereGeometry(0.025, 4, 4);
+
+    this.sets = {};
+    for (const [name, colors] of Object.entries(types)) {
+      const bodyMesh = new THREE.InstancedMesh(bodyGeo,
+        new THREE.MeshBasicMaterial({ color: colors.body }), this.maxBirds);
+      const beakMesh = new THREE.InstancedMesh(beakGeo,
+        new THREE.MeshBasicMaterial({ color: 0xff8800 }), this.maxBirds);
+      const wingMesh = new THREE.InstancedMesh(wingGeo,
+        new THREE.MeshBasicMaterial({ color: colors.wing }), this.maxBirds);
+      const eyeMesh = new THREE.InstancedMesh(eyeGeo,
+        new THREE.MeshBasicMaterial({ color: 0xffffff }), this.maxBirds);
+
+      for (const m of [bodyMesh, beakMesh, wingMesh, eyeMesh]) {
+        m.count = 0;
+        m.frustumCulled = false;
+        m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        scene.add(m);
+      }
+      this.sets[name] = { body: bodyMesh, beak: beakMesh, wing: wingMesh, eye: eyeMesh };
+    }
 
     this.time = 0;
   }
 
-  _getBird(index) {
-    if (index < this.birdPool.length) return this.birdPool[index];
-
-    const g = new THREE.Group();
-    const bodyMesh = new THREE.Mesh(this.bodyGeo, this.mats.ai);
-    const beakMesh = new THREE.Mesh(this.beakGeo, this.beakMat);
-    const wingMesh = new THREE.Mesh(this.wingGeo, this.wingMats.ai);
-    const eyeWhite = new THREE.Mesh(this.eyeGeo, this.eyeWhiteMat);
-    const pupil = new THREE.Mesh(this.pupilGeo, this.eyeBlackMat);
-
-    eyeWhite.position.set(0.15, 0.1, 0.13);
-    pupil.position.set(0.18, 0.1, 0.15);
-
-    g.add(bodyMesh, beakMesh, wingMesh, eyeWhite, pupil);
-    g.traverse(c => { c.frustumCulled = false; });
-
-    const entry = { group: g, body: bodyMesh, wing: wingMesh };
-    this.birdPool.push(entry);
-    this.group.add(g);
-    return entry;
-  }
-
   update(birds, bestAiBird, dt) {
-    this.time += dt || 0.016;
-    let idx = 0;
+    this.time += (dt || 0.016);
+    // Count per type
+    const counts = { ai: 0, best: 0, player: 0 };
+    const typed = { ai: [], best: [], player: [] };
+
     for (const bird of birds) {
       if (!bird.alive) continue;
-      const b = this._getBird(idx);
-      b.group.visible = true;
-      b.group.position.set(bird.x, bird.y, 0.5);
-
-      // Tilt based on velocity
-      const tilt = Math.max(-0.5, Math.min(0.5, bird.velocity * 0.05));
-      b.group.rotation.z = tilt;
-
-      // Flap wing
-      const flapSpeed = bird.velocity > 2 ? 20 : 10;
-      const flapAngle = Math.sin(this.time * flapSpeed + idx * 0.5) * 0.3;
-      b.wing.rotation.z = flapAngle;
-
-      // Set colors by type
       let type = 'ai';
       if (bird.isPlayer) type = 'player';
       else if (bird === bestAiBird) type = 'best';
-      b.body.material = this.mats[type];
-      b.wing.material = this.wingMats[type];
-
-      idx++;
+      typed[type].push(bird);
     }
-    // Hide unused birds
-    for (let i = idx; i < this.birdPool.length; i++) {
-      this.birdPool[i].group.visible = false;
+
+    for (const [type, list] of Object.entries(typed)) {
+      const set = this.sets[type];
+      let idx = 0;
+      for (const bird of list) {
+        // Body transform
+        this.dummy.position.set(bird.x, bird.y, 0.5);
+        const tilt = Math.max(-0.5, Math.min(0.5, bird.velocity * 0.05));
+        this.dummy.rotation.set(0, 0, tilt);
+        this.dummy.scale.set(1, 1, 1);
+        this.dummy.updateMatrix();
+        set.body.setMatrixAt(idx, this.dummy.matrix);
+        set.beak.setMatrixAt(idx, this.dummy.matrix);
+
+        // Wing with flap
+        const flapSpeed = bird.velocity > 2 ? 20 : 10;
+        const flapAngle = Math.sin(this.time * flapSpeed + idx * 0.7) * 0.3;
+        this.dummy.rotation.set(0, 0, tilt + flapAngle);
+        this.dummy.updateMatrix();
+        set.wing.setMatrixAt(idx, this.dummy.matrix);
+
+        // Eye (offset in local space: approximate with world offset)
+        const cos = Math.cos(tilt), sin = Math.sin(tilt);
+        const ex = 0.15 * cos - 0.1 * sin;
+        const ey = 0.15 * sin + 0.1 * cos;
+        this.dummy.position.set(bird.x + ex, bird.y + ey, 0.63);
+        this.dummy.rotation.set(0, 0, 0);
+        this.dummy.updateMatrix();
+        set.eye.setMatrixAt(idx, this.dummy.matrix);
+
+        idx++;
+      }
+      set.body.count = idx;
+      set.beak.count = idx;
+      set.wing.count = idx;
+      set.eye.count = idx;
+      if (idx > 0) {
+        set.body.instanceMatrix.needsUpdate = true;
+        set.beak.instanceMatrix.needsUpdate = true;
+        set.wing.instanceMatrix.needsUpdate = true;
+        set.eye.instanceMatrix.needsUpdate = true;
+      }
     }
   }
 }
@@ -1136,34 +1148,30 @@ class Game {
     this.lastTime = now;
 
     const steps = Config.speedMultiplier;
-    const headless = steps > 5;
 
-    if (headless) {
-      // Headless fast-forward: run multiple full steps without rendering
-      const stepDt = rawDt;
-      for (let s = 0; s < steps; s++) {
-        this.updatePhysics(stepDt);
-        // Check if generation ended (startGeneration resets birds)
-        // If so, we might be in a new generation already
-      }
-    } else {
-      // Normal: sub-step physics, render once
-      const stepDt = rawDt;
-      for (let s = 0; s < steps; s++) {
-        this.updatePhysics(stepDt);
-      }
+    // Run physics sub-steps
+    for (let s = 0; s < steps; s++) {
+      this.updatePhysics(rawDt);
     }
 
-    // Render
-    this.birdRenderer.update(this.birds, this.bestAiBird, rawDt);
-    this.pipeRenderer.update(this.pipeManager.pipes);
-    this.visionRenderer.update(this.birds, this.pipeManager, Config.showVision);
-    this.renderer.render(this.scene, this.camera);
+    // At >5x speed, only render every 3rd frame to save GPU time
+    if (!this._frameSkip) this._frameSkip = 0;
+    this._frameSkip++;
+    const skipRender = steps > 5 && (this._frameSkip % 3 !== 0);
 
-    // Update HUD
-    this.updateHUD();
+    if (!skipRender) {
+      this.birdRenderer.update(this.birds, this.bestAiBird, rawDt);
+      this.pipeRenderer.update(this.pipeManager.pipes);
+      this.visionRenderer.update(this.birds, this.pipeManager, Config.showVision);
+      this.renderer.render(this.scene, this.camera);
+    }
 
-    // Update NN viz
+    // Throttle HUD to every 5 frames
+    if (this._frameSkip % 5 === 0) {
+      this.updateHUD();
+    }
+
+    // NN viz (already internally throttled to 10fps)
     if (Config.showNN && this.bestAiBird && this.bestAiBird.genome) {
       this.nnViz.draw(this.bestAiBird.genome);
     }
