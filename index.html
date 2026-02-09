@@ -40,7 +40,7 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 .checkbox-row input { margin-right: 8px; accent-color: #e94560; }
 .checkbox-row label { font-size: 12px; cursor: pointer; }
 #nn-canvas { width: 100%; height: 180px; background: #111; border-radius: 4px; }
-#fitness-chart { width: 100%; height: 160px; }
+#fitness-chart { width: 100%; height: 120px; max-height: 120px; }
 .btn { background: #e94560; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .btn:hover { background: #c23152; }
 .btn-row { display: flex; gap: 8px; margin-top: 4px; }
@@ -130,7 +130,9 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 
     <div class="panel">
       <h3>Fitness History</h3>
-      <canvas id="fitness-chart"></canvas>
+      <div style="position:relative; height:120px; width:100%;">
+        <canvas id="fitness-chart"></canvas>
+      </div>
     </div>
 
     <div class="panel">
@@ -334,24 +336,34 @@ class BirdRenderer {
   constructor(scene) {
     this.scene = scene;
     this.maxBirds = 510;
-    const geo = new THREE.SphereGeometry(0.35, 8, 6);
-    const mat = new THREE.MeshPhongMaterial({ color: 0x4488ff });
+
+    // Bird body: slightly elongated ellipsoid
+    const geo = new THREE.SphereGeometry(0.4, 10, 8);
+    // MeshLambertMaterial responds well to instance colors in r128
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     this.mesh = new THREE.InstancedMesh(geo, mat, this.maxBirds);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.count = 0;
+    // Initialize instanceColor buffer so colors work from frame 1
+    this.colorObj = new THREE.Color();
+    for (let i = 0; i < this.maxBirds; i++) {
+      this.colorObj.set(0x4488ff);
+      this.mesh.setColorAt(i, this.colorObj);
+    }
+    this.mesh.instanceColor.needsUpdate = true;
     scene.add(this.mesh);
 
     this.dummy = new THREE.Object3D();
-    this.colorObj = new THREE.Color();
   }
 
   update(birds, bestAiBird) {
     let idx = 0;
     for (const bird of birds) {
       if (!bird.alive || idx >= this.maxBirds) continue;
-      this.dummy.position.set(bird.x, bird.y, 0);
-      const scaleY = 1 + bird.velocity * 0.02;
-      this.dummy.scale.set(1, Math.max(0.7, Math.min(1.3, scaleY)), 1);
+      this.dummy.position.set(bird.x, bird.y, 0.5);
+      const tilt = Math.max(-0.6, Math.min(0.6, bird.velocity * 0.06));
+      this.dummy.rotation.set(0, 0, tilt);
+      this.dummy.scale.set(1.1, 0.9, 0.8);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(idx, this.dummy.matrix);
 
@@ -862,6 +874,7 @@ class Game {
     const container = document.getElementById('game-container');
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
